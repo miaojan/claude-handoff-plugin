@@ -1,6 +1,20 @@
 # claude-handoff-plugin
 
-> Save `/loop` iteration state and fire `/clear` + the resume command in a fresh Claude Code session — without manual keystrokes. One slash command replaces "summarize → `/clear` → `/resume`."
+**Run `/loop` AFK for 8 hours without dying at 60% context.**
+
+A Claude Code plugin that watches your context window and, when an autonomous `/loop` session crosses threshold, automatically saves state and dispatches `/clear` + the resume command into the same terminal — so the fresh session picks up the loop where the previous one left off. No human at the keyboard required.
+
+![demo placeholder — record a 60s screen capture and drop it at docs/handoff-demo.gif](./docs/handoff-demo.gif)
+
+> _Demo TODO_: record cmux / Claude Code window mid-`/loop`, hook detects ctx ≥60%, watch the pane swap to a fresh session that resumes `/loop` verbatim. Drop the GIF at `docs/handoff-demo.gif`.
+
+## Why this exists
+
+If you run `/loop` AFK — atomic-ticket queues, overnight CI grinding, autonomous-loop sentinels — the session eventually fills Claude Code's context window. The fix is well-known: summarize, `/clear`, re-invoke `/loop` with the same prompt. But that fix needs a human at the keyboard at exactly the right moment, which defeats AFK.
+
+This plugin makes the fix automatic. A `UserPromptSubmit` hook reads context% from a sidecar (claude-hud writes one for free; any statusline can write `~/.claude/context_pct.json`). At threshold, in `/loop` mode, with a clean tree + pushed commits + PR gate green, it writes `~/.claude/handoff_last.json` and fires keystrokes via `cmux` / `tmux` / `screen` / OS-native automation. The fresh session reconciles the saved prompt against the new git HEAD and re-invokes `/loop` verbatim.
+
+**Not for you if** you only use Claude Code interactively. Auto-fire is gated to `/loop` AFK mode; interactive sessions get a reminder, not a takeover. Manual `/handoff:handoff` works in either, but `/clear` is destructive — only use when you're done with the current conversation.
 
 ## Install
 

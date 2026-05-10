@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Save /loop iteration state and auto-restart Claude Code with /clear + the resume slash command. Writes ~/.claude/handoff_last.json, then fires the auto-restart helper which dispatches keystrokes via cmux/tmux/screen/AppleScript/xdotool/wtype/PowerShell - whichever the host supports. Use when context is ≥60% and the current commit is pushed + CI-green; replaces the manual "summarize → /clear → /resume" sequence.
+description: Save /loop iteration state and auto-restart Claude Code with /clear + the resume slash command. Writes ~/.claude/handoff_last.json, then fires the auto-restart helper which dispatches keystrokes via cmux/tmux/screen/AppleScript/xdotool/wtype/PowerShell - whichever the host supports. Use when context is ≥60% and the current commit is pushed + CI-green; replaces the manual "summarize → /clear → /resume" sequence. **In /loop AFK mode the UserPromptSubmit hook auto-invokes this skill — never pause to ask the user.**
 ---
 
 # handoff
@@ -10,10 +10,9 @@ to a fresh Claude Code session without manual keystrokes.
 
 ## When to invoke
 
-- User types `/handoff:handoff` (or `/handoff` if Claude Code folds the
-  prefix when there's no naming conflict) — usually when the
-  UserPromptSubmit hook fires the "Context at X%" warning at 60/65/70
-  thresholds.
+- User types `/handoff:handoff` (or the auto-handoff hook fires it)
+  when context is high — typically when the UserPromptSubmit hook
+  outputs "Context at X%" at the 60/65/70 threshold.
 - The current commit is **pushed to origin and CI-green**. The next
   session resumes from the upstream — handing off mid-commit would
   replay a stale prompt against a half-landed change.
@@ -23,12 +22,33 @@ to a fresh Claude Code session without manual keystrokes.
 
 ## When NOT to invoke
 
-- Uncommitted work in the tree. Warn the user; let them decide
-  commit/stash.
-- Unpushed commits. Push first.
+- Uncommitted work in the tree. Surface the blocker and stop. Do NOT
+  pause to ask "want me to commit?" — finish the current atomic
+  yourself, push, then handoff fires on the next /loop re-entry.
+- Unpushed commits. Same — push first.
 - Red CI on the branch. Land the red-fix first.
 - No `/loop` prompt in scope. Handoff is /loop-specific; a plain
   `/clear + /<resume>` is the generic path and doesn't need this.
+
+## Auto-fire policy (CRITICAL)
+
+When invoked — whether by the user typing `/handoff:handoff` or by the
+UserPromptSubmit hook firing it automatically at threshold — the
+decision to hand off has already been made. **Do not stop to ask the
+user for confirmation.** The user is AFK by design — that's the whole
+reason this skill exists.
+
+The ONLY valid stop conditions are hard pre-flight failures:
+- Dirty tree
+- Unpushed commits
+- PR-gate blocker (red CI / merge conflict on an open PR)
+- Missing /loop prompt (no `<command-args>` in transcript, no
+  `loop_prompt` in previous handoff state)
+
+For each of these, surface the specific blocker and stop. Do NOT offer
+options. Do NOT ask "shall I fix it?" The model running on the other
+side of /clear will see the blocker on its first turn and resolve it
+in-loop.
 
 ## Execution
 
@@ -38,7 +58,7 @@ to a fresh Claude Code session without manual keystrokes.
      this conversation (verbatim shape, no leading `/loop`)
    - previous `~/.claude/handoff_last.json`'s `loop_prompt` (repeat
      handoff in one long arc)
-   - if none found, ask the user.
+   - if none found, surface the blocker and stop.
 
 2. **Pre-flight tree guard** (Bash, in current cwd):
    ```sh
@@ -51,11 +71,9 @@ to a fresh Claude Code session without manual keystrokes.
      exit 1
    fi
    ```
-   If non-empty, surface the output and stop. User decides
-   commit/stash/push.
+   If non-empty, surface the output and stop.
 
-2.5. **PR cleanup gate** (Bash). Past handoffs left orphan PRs because
-   the local-tree check above doesn't see GitHub. Run:
+2.5. **PR cleanup gate** (Bash):
    ```sh
    "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-pr-gate.sh"
    GATE_RC=$?
@@ -86,9 +104,9 @@ to a fresh Claude Code session without manual keystrokes.
      mv /tmp/h.json ~/.claude/handoff_last.json
    ```
 
-4. **Emit a 3-line summary** to the user (git HEAD short SHA + subject,
-   next ticket if identifiable, any in-flight state). Terse — the
-   state file has the full context.
+4. **Emit a 3-line summary** (git HEAD short SHA + subject, next
+   ticket if identifiable, any in-flight state). Terse — the state
+   file has the full context.
 
 5. **Fire the auto-restart** (caller MUST detach — script is synchronous):
    ```sh
@@ -130,8 +148,7 @@ to a fresh Claude Code session without manual keystrokes.
   System Settings → Privacy & Security → Accessibility. Future runs
   silent.
 - **`/clear` and resume concatenate**: inter-line sleep too short.
-  Bump `HANDOFF_SLEEP_BETWEEN` (default 7s; was 4s, bumped 2026-04-26
-  because 4s still raced on a busy box).
+  Bump `HANDOFF_SLEEP_BETWEEN` (default 7s).
 - **PR gate blocks handoff**: at least one open PR is CI-red or
   merge-conflicted. Per gate stdout, fix the blocker PR first.
 - **Handoff state already serviced**: `handoff-resume` re-fires anyway

@@ -41,17 +41,30 @@ The helper probes backends in order and uses the first one that's available. Eac
 
 If all backends fail, the helper logs "manual /clear + /handoff:handoff-resume needed" and exits — the state file is intact, you can resume by hand. **The Linux/Windows pathways are best-effort and have not been validated end-to-end. PRs / issues welcome.**
 
+## Auto-handoff at threshold (UserPromptSubmit hook)
+
+The plugin ships a `UserPromptSubmit` hook (`hooks/context-pct-guard.sh`) that runs on every prompt submission. Below threshold it prints a `ctx X%` readout to stdout (visible in Claude's system reminders, useful for self-judging context budget). At or above threshold it diverges by mode:
+
+- **Interactive session** (current prompt is NOT a `/loop`): emit a user-facing reminder to type `/handoff:handoff` once the current commit is pushed + CI-green. Does NOT auto-fire — interactive users should keep control.
+- **`/loop` AFK mode** (current prompt starts with `/loop` or is one of the autonomous-loop sentinels): pre-flight (clean tree + pushed + PR gate green) → auto-fire writer + auto-restart in background. The next prompt of this session is wiped by `/clear` and the fresh session resumes from `/handoff:handoff-resume`. If pre-flight fails, inject a directive to finish the current atomic and try again on next /loop re-entry.
+
+Cooldown of 120s (configurable) suppresses re-fires while the paste sequence is mid-flight.
+
+The hook reads context% from `~/.claude/context_pct.json` (written by your statusline) OR from claude-hud's transcript-keyed cache. **You need at least one of those two to be writing the sidecar — otherwise the hook silently no-ops.** claude-hud users get the cache for free; users with custom statusline setups should write `~/.claude/context_pct.json` with at least `{session_id, pct}`.
+
 ## Tunables (env vars)
 
-| var                       | default                       | what                                    |
-|---------------------------|-------------------------------|-----------------------------------------|
-| `HANDOFF_RESUME_CMD`      | `/handoff:handoff-resume`     | Resume command to fire after `/clear`   |
-| `HANDOFF_CLEAR_CMD`       | `/clear`                      | Reset command (rarely changed)          |
-| `HANDOFF_SLEEP_BETWEEN`   | `7`                           | Seconds between `/clear` and resume     |
-| `HANDOFF_PR_MAX_WAIT`     | `90`                          | Seconds to wait for in-flight CI        |
-| `HANDOFF_PR_POLL_INT`     | `15`                          | PR-gate poll interval                   |
-| `HANDOFF_PR_INCLUDE_DRAFT`| `0`                           | If `1`, draft PRs also gate the handoff |
-| `HANDOFF_TMUX_TARGET`     | _(active pane)_               | tmux `target-pane` (e.g. `0:1.2`)       |
+| var                       | default                       | what                                                 |
+|---------------------------|-------------------------------|------------------------------------------------------|
+| `CONTEXT_HANDOFF_THRESHOLD`| `60`                         | Threshold % above which the hook acts. Set to `101` to disable auto-fire entirely (hook still emits the `ctx X%` line below threshold). |
+| `AUTO_RE_FIRE_COOLDOWN_MS`| `120000`                      | Cooldown after auto-fire before another can trigger. |
+| `HANDOFF_RESUME_CMD`      | `/handoff:handoff-resume`     | Resume command to fire after `/clear`                |
+| `HANDOFF_CLEAR_CMD`       | `/clear`                      | Reset command (rarely changed)                       |
+| `HANDOFF_SLEEP_BETWEEN`   | `7`                           | Seconds between `/clear` and resume                  |
+| `HANDOFF_PR_MAX_WAIT`     | `90`                          | Seconds to wait for in-flight CI                     |
+| `HANDOFF_PR_POLL_INT`     | `15`                          | PR-gate poll interval                                |
+| `HANDOFF_PR_INCLUDE_DRAFT`| `0`                           | If `1`, draft PRs also gate the handoff              |
+| `HANDOFF_TMUX_TARGET`     | _(active pane)_               | tmux `target-pane` (e.g. `0:1.2`)                    |
 
 ## Failure modes
 

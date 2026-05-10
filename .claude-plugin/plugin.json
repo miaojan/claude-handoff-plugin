@@ -1,0 +1,21 @@
+{
+  "name": "handoff",
+  "description": "Save /loop iteration state and auto-restart Claude Code with /clear + the resume slash command. Use when context is high but the current commit is pushed and CI-green.",
+  "version": "0.1.0",
+  "author": {
+    "name": "miaojan",
+    "url": "https://github.com/miaojan"
+  },
+  "homepage": "https://github.com/miaojan/claude-handoff-plugin",
+  "repository": "https://github.com/miaojan/claude-handoff-plugin",
+  "license": "MIT",
+  "keywords": [
+    "loop",
+    "handoff",
+    "context",
+    "automation",
+    "cmux",
+    "tmux",
+    "claude-code"
+  ]
+}

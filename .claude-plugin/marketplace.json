@@ -1,0 +1,20 @@
+{
+  "name": "claude-handoff-plugin",
+  "owner": {
+    "name": "miaojan",
+    "url": "https://github.com/miaojan"
+  },
+  "metadata": {
+    "description": "Single-plugin marketplace for the handoff /loop helper.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "handoff",
+      "source": "./",
+      "description": "Save state + auto-restart helper for atomic /loop sessions.",
+      "category": "automation",
+      "tags": ["loop", "handoff", "context", "cmux", "tmux"]
+    }
+  ]
+}

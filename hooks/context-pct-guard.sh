@@ -68,6 +68,58 @@ transcript_path=$(printf '%s' "$STDIN_JSON" | jq -r '.transcript_path // empty' 
 cwd=$(printf '%s' "$STDIN_JSON" | jq -r '.cwd // empty' 2>/dev/null)
 current_prompt=$(printf '%s' "$STDIN_JSON" | jq -r '.prompt // empty' 2>/dev/null)
 
+# is_waiting_for_user: scan the LAST assistant turn in the transcript for
+# markers indicating the model is waiting on user input. Returns 0 if so.
+#
+# Bug this guards against: in /loop dynamic mode, ScheduleWakeup synthesizes
+# a UserPromptSubmit that LOOKS like a fresh /loop invocation. If the model's
+# previous turn ended with an open question to the user (because it noticed
+# context was high and recommended /handoff manually, or any other AskUser
+# scenario), auto-fire would /clear before the user could answer. Defer the
+# fire instead — next prompt submit re-evaluates.
+#
+# Signals (any one is sufficient):
+#   A) Last assistant turn contains a tool_use with name=AskUserQuestion
+#   B) Last assistant text block ends with `?` or `？` (fullwidth)
+is_waiting_for_user() {
+  local tpath="${transcript_path:-}"
+  [ -z "$tpath" ] && return 1
+  case "$tpath" in
+    /*) ;;
+    *) [ -n "${cwd:-}" ] && tpath="$cwd/$transcript_path" ;;
+  esac
+  [ ! -f "$tpath" ] && return 1
+
+  # Find the last assistant entry. Tail 300 lines for cheap scan; transcript
+  # is JSONL so each line is one event. Handle both .type and .role schemas.
+  local last_assistant
+  last_assistant=$(tail -300 "$tpath" 2>/dev/null \
+                   | jq -c 'select((.type // .role // "") == "assistant")' 2>/dev/null \
+                   | tail -1)
+  [ -z "$last_assistant" ] && return 1
+
+  # Signal A: AskUserQuestion tool_use in this turn.
+  if printf '%s' "$last_assistant" \
+     | jq -e '.. | objects | select(.type? == "tool_use" and .name? == "AskUserQuestion")' \
+     >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Signal B: text content ends with a question mark (ASCII or fullwidth).
+  # Strip carriage returns; check the trailing character of the concatenated
+  # text blocks. trailing whitespace tolerated.
+  local last_text
+  last_text=$(printf '%s' "$last_assistant" \
+              | jq -r '.. | objects | select(.type? == "text") | .text? // empty' 2>/dev/null \
+              | tr -d '\r')
+  if [ -n "$last_text" ] \
+     && printf '%s' "$last_text" | grep -qE '[?？][[:space:]]*$'; then
+    return 0
+  fi
+
+  return 1
+}
+
 pct=""
 rate_5h=""
 rate_7d=""
@@ -150,6 +202,24 @@ EOF
 fi
 
 # --- Loop AFK mode: auto-fire path ---------------------------------------
+
+# Open-question guard. If the model's last turn left a question for the
+# user (either via AskUserQuestion or trailing ?/？), DO NOT auto-fire —
+# the /clear would erase the question before the user could answer.
+# Defer to next prompt submit; user can still manually fire /handoff:handoff.
+if is_waiting_for_user; then
+  cat <<EOF
+⚠️  Context at ${pct_fmt}% (loop AFK mode) — auto-handoff DEFERRED.
+
+The model's last turn left an open question for the user; firing /clear
+now would erase it before the user could answer. Will re-evaluate on the
+next prompt submission.
+
+Manual override: type \`/handoff:handoff\` to fire anyway. To disable
+auto-handoff entirely: \`export CONTEXT_HANDOFF_THRESHOLD=101\`.
+EOF
+  exit 0
+fi
 
 # Idempotency: skip if we already fired within the cooldown window.
 # After /clear the fresh session has its own sidecar; the marker is
